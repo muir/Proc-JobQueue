@@ -1,0 +1,18 @@
+lib/Object/Dependency.pm
+lib/Proc/JobQueue.pm
+lib/Proc/JobQueue/BackgroundQueue.pm
+lib/Proc/JobQueue/Command.pm
+lib/Proc/JobQueue/DependencyJob.pm
+lib/Proc/JobQueue/DependencyQueue.pm
+lib/Proc/JobQueue/DependencyTask.pm
+lib/Proc/JobQueue/Job.pm
+lib/Proc/JobQueue/Move.pm
+lib/Proc/JobQueue/RemoteDependencyJob.pm
+lib/Proc/JobQueue/Sequence.pm
+lib/Proc/JobQueue/Sort.pm
+Makefile.PL
+MANIFEST			This list of files
+t/dependencies.t
+t/jobqueue.t
+t/remotejob.t
+META.yml                                 Module meta-data (added by MakeMaker)
