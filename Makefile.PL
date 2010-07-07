@@ -21,6 +21,7 @@ WriteMakefile(
 		'aliased'			=> 0,
 		'Eval::LineNumbers'		=> 0,
 		'File::Slurp'			=> 0,
+		'Object::Dependency'		=> 0,
 	},
 );
 

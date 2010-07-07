@@ -13,7 +13,7 @@ use Carp qw(confess);
 use Hash::Util qw(lock_keys);
 use Time::HiRes qw(time);
 
-our $VERSION = 0.3;
+our $VERSION = 0.4;
 our $debug = 1;
 our $status_frequency = 2;
 
