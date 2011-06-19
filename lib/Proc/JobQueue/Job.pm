@@ -5,11 +5,11 @@ use strict;
 use warnings;
 use Hash::Util qw(lock_keys);
 use Carp qw(confess);
-use File::Slurp::Remote::BrokenDNS qw($myfqdn %fqdnify);
 use Tie::Function::Examples qw(%q_shell);
 use Callback;
 use Proc::Background;
-require Proc::JobQueue;
+use Proc::JobQueue qw(is_remote_host);
+use Scalar::Util qw(weaken);
 
 our $debug = $Proc::JobQueue::debug;
 
@@ -86,8 +86,8 @@ sub start
 	if ($command) {
 		$job->{desc} = $command
 			unless $job->{desc};
-		if ($fqdnify{$host} ne $myfqdn) {
-			$command = "ssh $host -o StrictHostKeyChecking=no $q_shell{$command}";
+		if (is_remote_host($host)) {
+			$command = "ssh $host -o BatchMode=yes -o StrictHostKeyChecking=no $q_shell{$command}";
 		}
 		$job->{run} = $command
 			unless $job->{run};
@@ -125,6 +125,7 @@ sub queue
 	my ($job, $queue) = @_;
 	if ($queue) {
 		$job->{queue} = $queue;
+		weaken $job->{queue};
 	}
 	return $job->{queue};
 }
@@ -157,17 +158,24 @@ sub checkjob
 sub finished
 {
 	my ($job, @exit_code) = @_;
-	die $job unless $job->{jobnum};
+	return if $job->{status} eq 'finished';
+	$job->{status} = 'finished';
+	die "NO JOBNUM FOR $job" unless $job->{jobnum};
 	print STDERR "# FINISHED $job->{jobnum} $job->{desc} on $job->{host}\n" if $debug > 7;
 	if ($job->{postcb}) {
 		$_->call($job, @exit_code)
 			for @{$job->{postcb}};
 		delete $job->{postcb};  # may clean circular references
 	}
-	if ($job->{queue} && $job->{jobnum} && $job->{status} eq 'started') {
-		$job->{queue}->jobdone($job, 0, @exit_code);
-	} else {
-		print STDERR "# NOT CALLING JOBDONE for $job->{jobnum} $job->{desc}\n" if $debug > 5;
+	my $queue = $job->{queue};
+	undef $job->{queue};
+	if ($queue) {
+		if ($job->{jobnum}) {
+			print STDERR "# calling JOBDONE for $job->{jobnum} $job->{desc} ($job->{status})\n" if $debug > 5;
+			$queue->jobdone($job, 0, @exit_code);   # not re-entrant since startmore == 0
+		} else {
+			print STDERR "# NOT calling JOBDONE for $job->{jobnum} $job->{desc} ($job->{status})\n" if $debug;
+		}
 	}
 	if ($exit_code[0]) {
 		print STDERR "# calling failed(@exit_code) for $job->{jobnum} $job->{desc}\n" if $debug > 6;
@@ -177,11 +185,9 @@ sub finished
 		$job->success();
 		print STDERR "# done calling success() for $job->{jobnum} $job->{desc}\n" if $debug > 9;
 	}
-	if ($job->{queue}) {
-		$job->{queue}->startmore;
-		undef $job->{queue};
-	}
+	$queue->startmore if $queue;	# can be re-entrant
 }
+
 
 sub success
 {
@@ -207,10 +213,6 @@ sub failed
 		die "job $job->{desc} failed with @exit_code";
 	}
 }
-
-sub is_finished { 1 };
-
-sub cancelled { 0 };
 
 1;
 
@@ -247,14 +249,12 @@ Proc::JobQueue::Job - The $job objects for Proc::JobQueue
 
  $job->addpostcb()
 
- $job->is_finished()
-
- $job->cancelled()
-
 =head1 DESCRIPTION
 
 This is the base class for the C<$job> objects used by 
-L<Proc::JobQueue>.
+L<Proc::JobQueue>.  It supports running jobs in the background
+with L<Proc::Background>.  This class is designed to be overloaded.
+Only the C<start> and C<checkjob> methods use L<Proc::Background>.
 
 =head1 CONSTRUCTION
 
@@ -314,6 +314,9 @@ A function callback that will be invoked only if the job fails.
 
 =item checkjob()
 
+A return value of undef indicates the job is still running.  A defined
+value is the exit code for the job.
+
 =item start
 
 Starts this job.  This is usually called by 
@@ -331,8 +334,8 @@ Returns true if the job is runnable at this time.
 =item checkjob
 
 Checks to see if the job is still running.  This only really works with
-jobs which are unix commands.  If the job is done, C<finished()> will be
-invoked.
+jobs which are unix commands.  If the job is done, C<checkjob()> will
+invoke C<finished()>.  
 
 =item finished(@exit_code)
 
@@ -357,16 +360,6 @@ Add a callback to be called when the job completes.
 
 The C<$job> object and the C<@exit_code> will be added to the callback's arguments.
 
-=item is_finished
-
-Returns true: it's only called when the job is expected to be finished.  
-Used by L<Proc::JobQueue::CommandQueue> and L<Proc::JobQueue::Sequence>.
-
-=item cancelled
-
-Returns false.  
-Used by L<Proc::JobQueue::CommandQueue> and L<Proc::JobQueue::Sequence>
-
 =back
 
 =head1 SEE ALSO
@@ -381,6 +374,9 @@ L<Proc::JobQueue::Sequence>
 
 =head1 LICENSE
 
+Copyright (C) 2007-2008 SearchMe, Inc.
+Copyright (C) 2008-2010 David Sharnoff.
+Copyright (C) 2011 Google, Inc.
 This package may be used and redistributed under the terms of either
 the Artistic 2.0 or LGPL 2.1 license.
 

@@ -8,7 +8,6 @@ use warnings;
 require Proc::JobQueue::Job;
 our @ISA = qw(Proc::JobQueue::Job);
 
-
 sub new
 {
 	my ($pkg, $cmdStr, %params) = @_;

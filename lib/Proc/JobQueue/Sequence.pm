@@ -8,24 +8,15 @@ use warnings;
 use Proc::JobQueue::Job;
 use Hash::Util qw(lock_keys unlock_keys);
 our @ISA = qw(Proc::JobQueue::Job);
+use List::MoreUtils qw(all);
+use Scalar::Util qw(weaken);
+
+use overload
+	'""' => \&describe;
 
 my $debug = $Proc::JobQueue::debug;
 
-{
-	package Proc::JobQueue::Sequence::Command;
-	use strict;
-	use warnings;
-	our @ISA = qw(Proc::JobQueue::Sequence);
-	sub command { my $job = shift; return $job->{jobs}[0]->command(@_) }
-}
-
-{
-	package Proc::JobQueue::Sequence::Startup;
-	use strict;
-	use warnings;
-	our @ISA = qw(Proc::JobQueue::Sequence);
-	sub startup { my $job = shift; return $job->{jobs}[0]->startup(@_) }
-}
+my $ijobid = "A100";
 
 sub new
 {
@@ -37,43 +28,88 @@ sub new
 		jobs		=> \@jobs,
 		fubar		=> 0,
 		priority	=> 20,
-		callback	=> sub { 
-			my ($job, $host, $jobnum, $queue) = @_;
-			# runs quick!
-			$job->finished(0);
-		},
+		completed	=> 0,
+		state		=> 'waiting',
+		runnable	=> '?',
+		check		=> '?',
+		ijobid		=> $ijobid++,
+		queue_copy	=> undef,
 	);
-	$job->rebless;
-}
-
-sub rebless
-{
-	my ($job) = @_;
-	my $jobs = $job->{jobs};
-	my $new;
-	if ($jobs && @$jobs && $jobs->[0]->can('command')) {
-		$new = 'Proc::JobQueue::Sequence::Command';
-	} elsif ($jobs && @$jobs && $jobs->[0]->can('startup')) {
-		$new = 'Proc::JobQueue::Sequence::Startup';
-	} else {
-		$new = __PACKAGE__;
-	}
-	unlock_keys(%$job);
-	bless $job, $new;
-	lock_keys(%$job);
 	return $job;
 }
 
-sub runnable 	{ my $job = shift; return $job->{jobs}[0]->runnable(@_) }
-sub start	{ my $job = shift; return $job->{jobs}[0]->start(@_) }
+sub describe
+{
+	my ($job) = @_;
+	my $jobs = $job->{jobs};
+	my $num = $job->jobnum || '';
+	if (@$jobs) {
+		my $outof = @$jobs;
+		return "Sequence $num/$job->{ijobid}, $job->{completed}/$outof completed, top of queue $job->{state}/$job->{status} {$job->{runnable}/$job->{check}}: $jobs->[0]{desc}";
+	} else {
+		return "Sequence $num/$job->{ijobid}, $job->{completed} completed, no more";
+	}
+}
+
+sub can_callback
+{
+	my ($job) = @_;
+	return all { $_->can_callback } @{$job->{jobs}};
+}
+
+sub can_command
+{
+	my ($job) = @_;
+	return all { $_->can_command } @{$job->{jobs}};
+}
+
+sub runnable
+{
+	my $job = shift;
+	$job->{runnable} = $job->{jobs}[0]->runnable(@_);
+	$job->{desc} = $job->describe;
+	return $job->{runnable};
+}
+
+#
+# SUPER::start will call startup()
+#
+sub start
+{	
+	my $job = shift;
+	print "START $job\n" if $debug > 8;
+	$job->{state} = 'running';
+	$job->{desc} = $job->describe;
+	$job->SUPER::start(@_);
+}
+
+sub startup
+{
+	my $job = shift;
+	print "STARTUP $job\n" if $debug > 1;
+	$job->{jobs}[0]->start(@_);
+}
 
 sub checkjob
 {
 	my $job = shift;
+	print "CHECKJOB $job\n" if $debug > 8;
+	if ($job->{fubar}) {
+		print "CHECKJOB: fubar->1\n" if $debug > 8;
+		return 1;
+	}
+	unless (@{$job->{jobs}}) {
+		print "CHECKJOB: no more jobs -> 0\n" if $debug > 8;
+		return 0;
+	}
 	my $e = $job->{jobs}[0]->checkjob(@_);
-	return undef unless defined $e;
-	$job->{procbg} = $job->{jobs}[0]{procbg};  # fakes out Proc::JobQueue::Job::checkjob()
-	$job->SUPER::checkjob(@_);
+	if (defined($e)) {
+		print "CHECKJOB CALLING FINISHED ($e)\n" if $debug > 8;
+		$job->finished($e);
+	} else {
+		print "CHECKJOB: not done\n" if $debug > 3;
+	}
+	return $e;
 }
 
 sub jobnum
@@ -94,13 +130,9 @@ sub host
 sub finished
 {
 	my $job = shift;
-	$job->{jobs}[0]->finished(@_);
+	print "FINISHED $job\n" if $debug > 8;
+	$job->{completed}++;
 	$job->SUPER::finished(@_);	# should call success()
-}
-
-sub calljobdone
-{
-	# skip
 }
 
 sub success 
@@ -111,57 +143,42 @@ sub success
 	#
 	my ($job) = @_;
 	print "# SEQUENCE success on $job->{jobnum}\n" if $debug > 8;
-	my $queue = $job->{queue};
+	my $queue = $job->{queue} || $job->{queue_copy};
 	my $host = $job->{host};
 	my $first = $job->{jobs}[0];
-	$first->finished(0, $queue, $host);
-	if ($first->is_finished) {
-		shift(@{$job->{jobs}});
-		my $next = $job->{jobs}[0];
-		if ($next) {
-			# don't set a queue
-			$next->host($job->host);
-			$job->jobnum($job->jobnum);
-			$queue->add($job);
-			$queue->startmore;
-		} else {
-			print STDERR "no more jobs in sequence\n" if $debug > 1;
-		}
-	} else {
-		print STDERR "first isn't finished\n" if $debug > 1;
+	shift(@{$job->{jobs}});
+	my $next = $job->{jobs}[0];
+	if ($next) {
+		$job->{state} = 'waiting again';
+		$job->{desc} = $job->describe;
+		$job->{status} = 'queued';    # reaching into ::Job's data
+		$job->jobnum($job->{jobnum}); # side effect: set jobnum of child job
+		$next->host($job->host);      # keep on the same host for better caching
 		$queue->add($job);
+	} else {
+		print STDERR "no more jobs in sequence\n" if $debug > 1;
 	}
+	$first->finished(0);
 }
 
 sub failed 
 {
-	my ($job, $e) = @_;
+	my ($job, @e) = @_;
+	$job->SUPER::failed(@e);
+	$job->{state} = "failed (@e)";
 	my $first = $job->{jobs}[0];
-	$first->failed($e);
+	$first->finished(@e);
 	$job->{fubar} = 1;
 }
 
-sub is_finished 
+sub queue
 {
-	my $job = shift;
-	if ($job->{fubar}) {
-		# print STDERR "# seqence broken by bad exit\n";
-		return 1;
+	my ($job, $queue) = @_;
+	if ($queue) {
+		$job->{queue_copy} = $queue;
+		weaken $job->{queue_copy};
 	}
-	if (@{$job->{jobs}}) {
-		# print STDERR "# jobs still in queue\n";
-		return 0;
-	}
-	my $j1f = $job->{jobs}[0]->is_finished;
-	# print STDERR "Job1 is $j1f\n";
-	return $j1f;
-}
-
-sub cancelled
-{
-	my $job = shift;
-	my $first = $job->{jobs}[0];
-	return $job->{fubar} || $first->cancelled;
+	$job->SUPER::queue($queue);
 }
 
 1;
@@ -176,6 +193,8 @@ __END__
 
  use Proc::JobQueue::BackgroundQueue;
  use aliased 'Proc::JobQueue::Sequence';
+ use aliased 'Proc::JobQueue::Sort';
+ use aliased 'Proc::JobQueue::Move';
 
  my $queue = new Proc::JobQueue::BackgroundQueue;
 
@@ -205,6 +224,9 @@ L<Proc::JobQueue::Sort>
 
 =head1 LICENSE
 
+Copyright (C) 2007-2008 SearchMe, Inc.
+Copyright (C) 2008-2010 David Sharnoff.
+Copyright (C) 2011 Google, Inc.
 This package may be used and redistributed under the terms of either
-the Artistic 2.0 or LGPL 2.1 license.
+the Artistic 2.0 or LGPL 2.1 licenses.
 

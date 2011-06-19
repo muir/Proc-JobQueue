@@ -1,21 +1,24 @@
 
 package Proc::JobQueue;
 
-# $Id: JobQueue.pm 13853 2009-07-24 00:59:44Z david $
-
 use strict;
 use warnings;
 
 use Time::HiRes qw(sleep);
 use Sys::Hostname;
-use File::Slurp::Remote::BrokenDNS qw($myfqdn %fqdnify);
 use Carp qw(confess);
 use Hash::Util qw(lock_keys);
 use Time::HiRes qw(time);
+use Module::Load;
+require Exporter;
 
-our $VERSION = 0.4;
-our $debug = 1;
-our $status_frequency = 2;
+our $VERSION = 0.501;
+our $debug ||= 0;
+our $status_frequency ||= 2;
+our $host_canonicalizer ||= 'File::Slurp::Remote::CanonicalHostnames';
+
+our @ISA = qw(Exporter);
+our @EXPORT_OK = qw(is_remote_host canonicalize my_hostname);
 
 sub configure
 {
@@ -64,10 +67,10 @@ sub new
 		jobnum		=> 1000,
 		jobs_per_host	=> 4,
 		queue		=> {},
-		hosts		=> [ $myfqdn ],
 		status		=> {},
 		ready_hosts	=> {},
 		hold_all	=> 0,
+		hosts		=> [ my_hostname() ],
 		%params,
 	}, $pkg;
 	$queue->addhost($_) for @{$queue->{hosts}};
@@ -209,8 +212,6 @@ sub jobdone
 
 	$queue->set_readiness($host);
 
-	$job->{status} = 'finished';
-
 	$queue->startmore() if $startmore;
 }
 
@@ -252,6 +253,34 @@ sub status
 		}
 	}
 }
+
+my $canonicalizer;
+sub get_canonicalizer
+{
+	return $canonicalizer if $canonicalizer;
+	load($host_canonicalizer);
+	$canonicalizer = $host_canonicalizer->new();
+}
+
+sub canonicalize
+{
+	my ($host) = @_;
+	return get_canonicalizer()->canonicalize($host);
+}
+
+my $my_hostname;
+sub my_hostname
+{
+	return $my_hostname if $my_hostname;
+	$my_hostname = get_canonicalizer()->myname();
+}
+
+sub is_remote_host
+{
+	my ($host) = @_;
+	return my_hostname() ne canonicalize($host);
+}
+
 
 1;
 
@@ -416,6 +445,19 @@ Get (or set if $new_value is defined) the queue's hold-all-jobs parameter.
 
 =back
 
+=head1 CANONICAL HOSTNAMES
+
+Proc::JobQueue needs canonical hostnames.  It gets them by default
+with L<Proc::JobQueue::CanonicalHostnames>.  You can override this 
+default by overriding C<$Proc::JobQueue::host_canonicalizer> with
+the name of a perl module to use instead of 
+L<Proc::JobQueue::CanonicalHostnames>.  
+
+Helper functions are provided by Proc::JobQueue and are available
+via explicit import:
+
+ use Proc::JobQueue qw(my_hostname canonicalize is_remote_host);
+
 =head1 SEE ALSO
 
 L<Proc::JobQueue::Job>
@@ -424,6 +466,9 @@ L<Proc::JobQueue::BackgroundQueue>
 
 =head1 LICENSE
 
+Copyright (C) 2007-2008 SearchMe, Inc.   
+Copyright (C) 2008-2010 David Sharnoff.
+Copyright (C) 2011 Google, Inc.
 This package may be used and redistributed under the terms of either
 the Artistic 2.0 or LGPL 2.1 license.
 

@@ -1,0 +1,4 @@
+
+Proc::JobQueue::Move now deletes the orginal file when
+moving files to remote hosts.
+

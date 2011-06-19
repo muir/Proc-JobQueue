@@ -1,0 +1,152 @@
+NAME
+     Proc::JobQueue - generic job queue base class
+
+SYNOPSIS
+     use Proc::JobQueue;
+
+     $queue = Proc::JobQueue->new(%parameters);
+
+     $queue->addhost($host, %parameters);
+
+     $queue->add($job);
+     $queue->add($job, $host);
+
+     $queue->startmore();
+
+     $queue->hold($new_value);
+
+     $queue->checkjobs();
+
+     $queue->jobdone($job, $do_startmore, @exit_code);
+
+     $queue->alldone()
+
+     $queue->status()
+
+     $queue->startjob($host, $jobnum, $job);
+
+DESCRIPTION
+    Generic queue of "jobs". Most likely to be subclassed for different
+    situations. Jobs are registered. Hosts are registered. Jobs may or may
+    not be tied to particular hosts. Jobs are started on hosts.
+
+    Jobs are started with:
+
+      $job->jobnum($jobnum);
+      $jobnum = $job->jobnum();
+      $job->queue($queue);
+      $job->host($host);
+      $job->start();
+
+    When jobs complete, they must call:
+
+      $queue->jobdone($job, $do_startmore, @exit_code);
+
+    Hosts are added with:
+
+      $queue->addhost($host, name => $hostname, jobs_per_host => $number_to_run_on_this_host)
+
+CONSTRUCTION
+    The parameters for "new" are:
+
+    jobs_per_host (default: 4)
+        Default number of jobs to run on each host simultaneously. This can
+        be overridden on a per-host basis.
+
+    host_overload (default: 120)
+        If any one host has more than this many jobs waiting for it, no
+        can-run-on-any-host jobs will be started. This is to prevent the
+        queue for this one overloaded host from getting too large.
+
+    jobnum (default: 1000)
+        This is the starting job number. Job numbers are sometimes
+        displayed. They increment for each new job.
+
+    hold_all (default: 0)
+        If true, prevent any jobs from starting until "$queue->hold(0)" is
+        called.
+
+METHODS
+    configure(%params)
+        Adjusts the same parameters that can be set with "new".
+
+    addhost($host, %params)
+        Register a new host. Parameters are:
+
+        name
+            The hostname
+
+        jobs_per_host
+            The number of jobs that can be run at once on this host. This
+            defaults to the jobs_per_host parameter of the $queue.
+
+    add($job, $host)
+        Add a job object to the queue. The job object must be a
+        Proc::JobQueue::Job or subclass of Proc::JobQueue::Job. The $host
+        parameter is optional: if not set, the job can be run on any host.
+
+        The $job object is started with:
+
+          $job->jobnum($jobnum);
+          $jobnum = $job->jobnum();
+          $job->queue($queue);
+          $job->host($host);
+          $job->start();
+
+        When the job complets, it must call:
+
+          $queue->jobdone($job, $do_startmore, @exit_code);
+
+    jobdone($job, $do_startmore, @exit_code)
+        When jobs complete, they must call jobdone. If $do_startmore is
+        true, then "startmore()" will be called. A true exit code signals an
+        error and it is used by Proc::JobQueue::CommandQueue.
+
+    alldone
+        This checks the job queue. It returns true if all jobs have
+        completed and the queue is empty.
+
+    status
+        This prints a queue status to STDERR showing what's running on which
+        hosts. Printing is supressed unless
+        $Proc::JobQueue::status_frequency seconds have passed since the last
+        call to "status()".
+
+    startmore
+        This will start more jobs if possible. The return value is true if
+        there are no more jobs to start.
+
+    startjob($host, $jobnum, $job)
+        This starts a single job. It is used by startmore() and probably
+        should not be used otherwise.
+
+    checkjobs
+        This is used be Proc::JobQueue::BackgroundQueue.
+
+    hold($new_value)
+        Get (or set if $new_value is defined) the queue's hold-all-jobs
+        parameter.
+
+          $queue->jobdone($job, $do_startmore, @exit_code);
+
+CANONICAL HOSTNAMES
+    Proc::JobQueue needs canonical hostnames. It gets them by default with
+    Proc::JobQueue::CanonicalHostnames. You can override this default by
+    overriding $Proc::JobQueue::host_canonicalizer with the name of a perl
+    module to use instead of Proc::JobQueue::CanonicalHostnames.
+
+    Helper functions are provided by Proc::JobQueue and are available via
+    explicit import:
+
+     use Proc::JobQueue qw(my_hostname canonicalize is_remote_host);
+
+SEE ALSO
+    Proc::JobQueue::Job Proc::JobQueue::DependencyQueue
+    Proc::JobQueue::BackgroundQueue
+
+LICENSE
+    Copyright (C) 2007-2008 SearchMe, Inc. Copyright (C) 2008-2010 David
+    Sharnoff. Copyright (C) 2011 Google, Inc. This package may be used and
+    redistributed under the terms of either the Artistic 2.0 or LGPL 2.1
+    license.
+

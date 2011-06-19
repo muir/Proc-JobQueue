@@ -41,7 +41,14 @@ sub finish
 			$queued += keys %{$hr->{queue}};
 		}
 
-		print STDERR "Finish loop top: $running running, $queued queued\n" if $debug;
+		if ($debug > 2) {
+			print STDERR "Finish loop top: $running running, $queued queued\n";
+			for my $host (@{$queue->{hosts}}) {
+				my $hr = $queue->{status}{$host};
+				print "running: " . join(", ", map { $_ . ": " . $hr->{running}{$_}{desc} } keys %{$hr->{running}} ) . "\n" if $running;
+				print "queued: " . join(", ", map { $_ . ": " . $hr->{running}{$_}{desc} } keys %{$hr->{queue}} ) . "\n" if $queued;
+			}
+		}
 
 		return unless $queued || $running;
 
@@ -78,6 +85,9 @@ Jobs are invoked using L<Proc::Background>.
 
 =head1 LICENSE
 
+Copyright (C) 2007-2008 SearchMe, Inc.
+Copyright (C) 2008-2010 David Sharnoff.
+Copyright (C) 2011 Google, Inc.
 This package may be used and redistributed under the terms of either
 the Artistic 2.0 or LGPL 2.1 license.
 
