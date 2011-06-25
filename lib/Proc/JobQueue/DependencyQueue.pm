@@ -234,7 +234,8 @@ queue with a a dependency graph, L<Object::Dependency>.
 
 The jobs that it runs are either full-fledged jobs, 
 L<Proc::JobQueue::DependencyJob>, or 
-simple perl callbacks that aren't scheduled: L<Proc::JobQueue::DependencyTask>.
+simple synchronous one-shot perl callbacks that execute as soon as their
+prerequisites are met: L<Proc::JobQueue::DependencyTask>.
 
 Generally, the way to use this is to generate your dependency graph, then
 create your job queue, then start some jobs.
@@ -246,7 +247,7 @@ jobs.  It also changes C<$Event::DIED> to unloop.
 =head1 API
 
 In addition to the parameters supported by L<Proc::JobQueue>, the following
-parameters are used:
+construction parameters are used:
 
 =over
 
@@ -257,9 +258,9 @@ This should be a L<Object::Dependency> object.
 =back
 
 In addition to the methods inherited from L<Proc::JobQueue>, this module
-add:
+adds:
 
-=ovew
+=over
 
 =item job_part_finished($job)
 
@@ -269,6 +270,9 @@ This marks the C<$job> as complete and a new job can start in its place.
 
 =head1 LICENSE
 
+Copyright (C) 2007-2008 SearchMe, Inc.   
+Copyright (C) 2008-2010 David Sharnoff.
+Copyright (C) 2011 Google, Inc.
 This package may be used and redistributed under the terms of either
 the Artistic 2.0 or LGPL 2.1 license.
 

@@ -12,7 +12,7 @@ use Time::HiRes qw(time);
 use Module::Load;
 require Exporter;
 
-our $VERSION = 0.501;
+our $VERSION = 0.601;
 our $debug ||= 0;
 our $status_frequency ||= 2;
 our $host_canonicalizer ||= 'File::Slurp::Remote::CanonicalHostnames';

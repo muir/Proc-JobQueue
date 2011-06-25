@@ -104,7 +104,7 @@ __END__
 
 =head1 NAME
 
-Proc::JobQueue::DependencyJob - job object for DependencyQueue's
+Proc::JobQueue::DependencyJob - job object for DependencyQueues
 
 =head1 SYNOPSIS
 
@@ -119,19 +119,21 @@ Proc::JobQueue::DependencyJob - job object for DependencyQueue's
 
  $job->job_part_finished()
 
+ $job->jobdone();
+
  $job->failure(@exit_code)
 
 =head1 DESCRIPTION
 
 Proc::JobQueue::DependencyJob is a subclass of 
-L<Proc::JobQueue::Job> for use with
+L<Proc::JobQueue::Job> used to define jobs to run from a 
 L<Proc::JobQueue::DependencyQueue>.
 
-DependencyJob jobs are perl callbacks.  C<$job-E<gt>startup()> is
-called to start the job.  That in turn calls, the callback.  The
+DependencyJob jobs are perl objects with a callback API.  C<$job-E<gt>startup()> is
+called to start the job.  That in turn calls, the callback provided in construction.  The
 C<$job> object is added to the argument list for the callback.
 
-The return value from the callback let's C<startup()> know what to do
+The return value from the callback lets C<startup()> know what to do
 next: the job is finished; the job finished but it remains a 
 dependency in the dependency graph; the job is not done but it should
 be removed from the dependency graph; or the job is not done and 
@@ -142,18 +144,21 @@ by calling C<$job-E<gt>finished(0)> or C<$job-E<gt>failure($reason)>.
 
 =head1 CONSTRUCTION
 
-These jobs require a dependency graph for construction.
+These jobs require a dependency graph for construction.  The C<%params> 
+parameter represents additional parameters passed to L<Proc::JobQueue::Job>.
 
 =head1 METHODS
 
-In addition to the methods in L<Proc::JobQueue::Job>...
+In addition to the methods in L<Proc::JobQueue::Job>, DependencyJob provides:
 
 =over
 
 =item startup()
 
 This is called by C<Proc::JobQueue::Job::start()>.  It calls the 
-callback.  The callback must return.  The return value must be one of:
+callback.  The callback must return.  A reference to self (C<$job>)
+is provided as an argument to the callback.
+The return value from the callback must be a string from the following set:
 
 =over
 
@@ -165,7 +170,7 @@ be removed.
 =item C<all-keep>
 
 The job has not completed and the dependency in the dependency graph should
-be completed.
+be kept.
 
 The job can be marked as done with:
 
@@ -175,7 +180,8 @@ The dependency can be marked as completed with:
 
  $job->{dependency_graph}->remove_dependency($job);
 
-Or both the job and the dependency can be marked as done/completed:
+Or both the job and the dependency can be marked as done/completed with
+one call:
 
  $job->finished(0);
 
@@ -198,6 +204,8 @@ Or
 
  $job->job_part_finished($do_startmore)
 
+Things which depend on this job are eligible to be started.
+
 =back
 
 =item failed()
@@ -219,6 +227,9 @@ L<Proc::JobQueue>
 
 =head1 LICENSE
 
+Copyright (C) 2007-2008 SearchMe, Inc.   
+Copyright (C) 2008-2010 David Sharnoff.
+Copyright (C) 2011 Google, Inc.
 This package may be used and redistributed under the terms of either
 the Artistic 2.0 or LGPL 2.1 license.
 

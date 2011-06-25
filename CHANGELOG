@@ -1,4 +1,18 @@
 
+=== 2011/06/24	0.601
+
+Deprecate the new() constructor of 
+Proc::JobQueue::RemoteDependencyJob in favor of create()
+since the parameters of new() don't make much sense.
+
+Wrote regression tests for dependency jobs.  Fixed many bugs.
+
+Updated documentation.
+
+=== 2011/06/18	0.501
+
 Proc::JobQueue::Move now deletes the orginal file when
 moving files to remote hosts.
+
+Proc::JobQueue::Sequence rewritten
 

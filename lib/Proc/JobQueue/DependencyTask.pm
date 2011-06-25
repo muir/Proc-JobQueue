@@ -14,9 +14,9 @@ sub new
 	confess "A function is required" unless $params{func};
 	$params{args} ||= [];
 	my $task = bless { 
-		desc	=> $params{desc} || "no desc, called from $file:$line",
-		trace	=> "$file:$line",
-		errors	=> $params{errors} || sub { print STDERR @_ },
+		desc		=> $params{desc} || "no desc, called from $file:$line",
+		trace		=> "$file:$line",
+		errors		=> $params{errors} || sub { print STDERR @_ },
 		%params,
 	}, $pkg;
 	$task->set_cb($params{func}, $params{args});
@@ -75,9 +75,9 @@ Proc::JobQueue::DependencyTask - callbacks for use with DependencyQueue
  use Proc::JobQueue::DependencyTask;
  use Object::Dependency;
 
- my $graph = Object::Dependency->new()
+ $graph = Object::Dependency->new()
 
- my $task = Proc::JobQueue::DependencyTask->new( $description, $callback );
+ $task = Proc::JobQueue::DependencyTask->new( $description, $callback );
 
  $graph->add($task);
 
@@ -87,10 +87,12 @@ A task is lighter than a job (L<Proc::JobQueue::DependencyJob>) -- it
 is never more than a callback.   It does not get schedueled as a
 job (L<Proc::JobQueue>).
 
-A task requires a callback.  That callback's return value can be one of:
-
 Tasks can be put in a dependency graph (L<Object::Dependency>) 
 and used by L<Proc::JobQueue::DependencyQueue>.
+
+A task requires a callback.  
+The callback is invoked in array context.  The first element of the
+return value must be one of the following strings:
 
 =over
 
@@ -101,7 +103,8 @@ Remove this task from the dependency graph.
 =item C<requeue>
 
 Unlock the task in the dependency graph so that it can be called
-again.   Optionally replace the callback.
+again.  If there is a second return value from the callback, the
+callback is replaced with the second return value.
 
 =item C<keep>
 
@@ -115,6 +118,9 @@ Later, the task will need to removed from the dependency graph with
 
 =head1 LICENSE
 
+Copyright (C) 2007-2008 SearchMe, Inc.   
+Copyright (C) 2008-2010 David Sharnoff.
+Copyright (C) 2011 Google, Inc.
 This package may be used and redistributed under the terms of either
 the Artistic 2.0 or LGPL 2.1 license.
 

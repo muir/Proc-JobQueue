@@ -1,3 +1,7 @@
 
-Write regression tests for the dependency queue and remote dependency job
+
+Provide some way to use the non-dependnecy jobs in a dependency queue
+or merge the APIs
+
+
 
