@@ -4,9 +4,9 @@ package Proc::JobQueue::DependencyQueue;
 use strict;
 use warnings;
 use Carp qw(confess);
-use Hash::Util qw(lock_keys unlock_keys);
 require Proc::JobQueue;
 use Time::HiRes qw(time);
+use Object::Dependency;
 require POSIX;
 
 our @ISA = qw(Proc::JobQueue);
@@ -18,11 +18,9 @@ sub new
 {
 	my ($pkg, %params) = @_;
 
-	confess if $params{host} && $params{host} eq 'host';
-	die unless $params{dependency_graph};
+	$params{dependency_graph} ||= Object::Dependency->new();
 
 	my $queue = $pkg->SUPER::new(
-		dependency_graph	=> undef,
 		startmore_in_progress	=> 0,
 		on_failure		=> \&on_failure,
 		%params
@@ -62,111 +60,12 @@ sub new
 	return $queue;
 }
 
-sub add
+sub unloop
 {
-	my ($job_queue, $job, $host) = @_;
-	# confess if exists $job->{job_is_finished};
-	unlock_keys(%$job);
-	$job->{dependency_graph} = $job_queue->{dependency_graph};
-	lock_keys(%$job);
-	$job_queue->SUPER::add($job, $host);
-}
-
-sub job_part_finished
-{
-	my ($job_queue, $job, $do_startmore) = @_;
-	$job_queue->SUPER::jobdone($job, $do_startmore);
-}
-
-sub jobdone
-{
-	my ($job_queue, $job, $do_startmore, @exit_code) = @_;
-	if ($job->{dependency_graph}) {
-		if ($exit_code[0]) {
-			print STDERR "Things dependent on $job->{desc} will never run: @exit_code\n";
-			$job->{dependency_graph}->stuck_dependency($job, "exit @exit_code");
-		} else {
-			$job->{dependency_graph}->remove_dependency($job);
-		}
-		$job->{dependency_graph} = undef;
-		# unlock_keys(%$job);
-		# $job->{this_is_finished} = 1;
-		# lock_keys(%$job);
+	my ($queue) = @_;
+	if (defined(&IO::Event::unloop_all)) {
+		IO::Event::unloop_all();
 	}
-	$job_queue->SUPER::jobdone($job, $do_startmore, @exit_code);
-}
-
-sub startmore
-{
-	my ($job_queue) = shift;
-
-	if ($job_queue->{startmore_in_progress}) {
-		print STDERR "Re-entry to startmore prevented\n" if $debug;
-		$job_queue->{startmore_in_progress}++;
-		return 0;
-	}
-	$job_queue->{startmore_in_progress} = 2;
-
-	my $dependency_graph = $job_queue->{dependency_graph};
-
-	my $stuff_started = 0;
-
-	my $jq_done;
-
-	print STDERR "looking for more depenency graph items to queue up\n" if $debug;
-	eval {
-		$job_queue->checkjobs();
-
-		while ($job_queue->{startmore_in_progress} > 1) {
-			$job_queue->{startmore_in_progress} = 1;
-			while (my @runnable = $dependency_graph->independent(lock => 1)) {
-				$stuff_started++;
-				for my $task (@runnable) {
-					if ($task->can('run_dependency_task')) {
-						$job_queue->{startmore_in_progress}++ if $task->run_dependency_task($dependency_graph);
-					} elsif ($task->isa('Proc::JobQueue::Job')) {
-						$job_queue->add($task, $task->{force_host});
-					} else {
-						die "don't know how to handle $task";
-					}
-				}
-			}
-
-			$jq_done = $job_queue->SUPER::startmore();
-
-			redo if $job_queue->{startmore_in_progress} > 1;
-		}
-	};
-	if ($@) {
-		print STDERR "DIE DIE DIE DIE DIE (DT2): $@";
-		# exit 1; hangs!
-		POSIX::_exit(1);
-	};
-
-	$job_queue->{startmore_in_progress} = 0;
-
-	if ($jq_done && $dependency_graph->alldone) {
-		print STDERR "Nothing more to do\n";
-		if (defined(&IO::Event::unloop_all)) {
-			IO::Event::unloop_all();
-		}
-		return 1;
-	} elsif ($jq_done && ! $stuff_started) {
-		if (keys %{$dependency_graph->{stuck}}) {
-			print STDERR "All runnable jobs are done, remaining dependencies are stuck:\n";
-			for my $o (values %{$dependency_graph->{stuck}}) {
-				printf "\t%s\n", $dependency_graph->desc($o);
-			}
-			if (defined(&IO::Event::unloop_all)) {
-				IO::Event::unloop_all();
-			}
-			return 1;
-		} else {
-			print STDERR "Job queue is empty, but dependency graph doesn't think there is any work to be done!\n";
-			$dependency_graph->dump_graph();
-		}
-	}
-	return 0;
 }
 
 sub on_failure
@@ -181,22 +80,17 @@ sub on_failure
 	}
 }
 
-sub status
-{
-	my ($queue) = @_;
-	$queue->SUPER::status();
-	my $dg = $queue->{dependency_graph};
-	printf "Dependency Graph items: %d independent (%d locked %d active), %d total, alldone=%s\n",
-		scalar(keys(%{$dg->{independent}})),
-		scalar(grep { $_->{dg_lock} } values %{$dg->{independent}}),
-		scalar(grep { $_->{dg_active} } values %{$dg->{independent}}),
-		scalar(keys(%{$dg->{addrmap}})),
-		$dg->alldone;
-}
 
 1;
 
 __END__
+
+
+There are two queues: the "jobs" that are ready to run, managed
+by the superclass (Proc::JobQueue) and the tasks and jobs that 
+have not had their prerequisites met that are in the 
+Object::Dependency queue.
+
 
 =head1 SYNOPSIS
 

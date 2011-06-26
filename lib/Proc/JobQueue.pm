@@ -7,12 +7,12 @@ use warnings;
 use Time::HiRes qw(sleep);
 use Sys::Hostname;
 use Carp qw(confess);
-use Hash::Util qw(lock_keys);
+use Hash::Util qw(lock_keys unlock_keys);
 use Time::HiRes qw(time);
 use Module::Load;
 require Exporter;
 
-our $VERSION = 0.601;
+our $VERSION = 0.602;
 our $debug ||= 0;
 our $status_frequency ||= 2;
 our $host_canonicalizer ||= 'File::Slurp::Remote::CanonicalHostnames';
@@ -62,15 +62,17 @@ sub new
 {
 	my ($pkg, %params) = @_;
 	my $queue = bless {
-		host_overload	=> 120,
-		host_is_over	=> 0,
-		jobnum		=> 1000,
-		jobs_per_host	=> 4,
-		queue		=> {},
-		status		=> {},
-		ready_hosts	=> {},
-		hold_all	=> 0,
-		hosts		=> [ my_hostname() ],
+		dependency_graph	=> undef,
+		startmore_in_progress	=> undef,
+		host_overload		=> 120,
+		host_is_over		=> 0,
+		jobnum			=> 1000,
+		jobs_per_host		=> 4,
+		queue			=> {},
+		status			=> {},
+		ready_hosts		=> {},
+		hold_all		=> 0,
+		hosts			=> [ my_hostname() ],
 		%params,
 	}, $pkg;
 	$queue->addhost($_) for @{$queue->{hosts}};
@@ -105,11 +107,99 @@ sub add
 	}
 
 	$q->{$jobnum} = $job;
+
+	unlock_keys(%$job);
+	$job->{dependency_graph} = $queue->{dependency_graph};
+	lock_keys(%$job);
+
 	$job->queue($queue);
 	$queue->startmore;
 }
 
+# this looks at the dependency queue.  startmore_jobs looks at the 
+# at the jobs queue.
 sub startmore
+{
+	my ($job_queue) = shift;
+
+	if ($job_queue->{startmore_in_progress}) {
+		print STDERR "Re-entry to startmore prevented\n" if $debug;
+		$job_queue->{startmore_in_progress}++;
+		return 0;
+	}
+	$job_queue->{startmore_in_progress} = 2;
+
+	my $dependency_graph = $job_queue->{dependency_graph};
+
+	my $stuff_started = 0;
+
+	my $jq_done;
+
+	print STDERR "looking for more depenency graph items to queue up\n" if $debug;
+	eval {
+		$job_queue->checkjobs();
+
+		while ($job_queue->{startmore_in_progress} > 1) {
+			$job_queue->{startmore_in_progress} = 1;
+			if ($dependency_graph) {
+				while (my @runnable = $dependency_graph->independent(lock => 1)) {
+					$stuff_started++;
+					for my $task (@runnable) {
+						print "Queuing $task->{desc}\n" if $debug;
+						if ($task->can('run_dependency_task')) {
+							$job_queue->{startmore_in_progress}++ if $task->run_dependency_task($dependency_graph);
+						} elsif ($task->isa('Proc::JobQueue::Job')) {
+							$job_queue->add($task, $task->{force_host});
+						} else {
+							die "don't know how to handle $task";
+						}
+					}
+				}
+			}
+
+			$jq_done = $job_queue->startmore_jobs();
+
+			redo if $job_queue->{startmore_in_progress} > 1;
+		}
+	};
+	if ($@) {
+		$job_queue->suicide();
+	};
+
+	$job_queue->{startmore_in_progress} = 0;
+
+	return $jq_done unless $dependency_graph;
+
+	if ($jq_done && $dependency_graph->alldone) {
+		print STDERR "Nothing more to do\n";
+		$job_queue->unloop();
+		return 1;
+	} elsif ($jq_done && ! $stuff_started) {
+		if (keys %{$dependency_graph->{stuck}}) {
+			print STDERR "All runnable jobs are done, remaining dependencies are stuck:\n";
+			for my $o (values %{$dependency_graph->{stuck}}) {
+				printf "\t%s\n", $dependency_graph->desc($o);
+			}
+			$job_queue->unloop();
+			return 1;
+		} else {
+			print STDERR "Job queue is empty, but dependency graph doesn't think there is any work to be done!\n";
+			$dependency_graph->dump_graph();
+		}
+	}
+	return 0;
+}
+
+sub suicide 
+{
+	print STDERR "DIE DIE DIE DIE DIE (DT2): $@";
+	# exit 1; hangs!
+	POSIX::_exit(1);
+}
+
+sub unloop { }
+
+sub startmore_jobs
 {
 	my ($queue) = @_;
 	return 0 if $queue->{hold_all};
@@ -198,23 +288,39 @@ sub checkjobs
 
 sub jobdone
 {
-	my ($queue, $job, $startmore, @exit_code) = @_;
+	my ($job_queue, $job, $do_startmore, @exit_code) = @_;
+	if ($job->{dependency_graph}) {
+		if ($exit_code[0]) {
+			print STDERR "Things dependent on $job->{desc} will never run: @exit_code\n";
+			$job->{dependency_graph}->stuck_dependency($job, "exit @exit_code");
+		} else {
+			$job->{dependency_graph}->remove_dependency($job);
+		}
+		$job->{dependency_graph} = undef;
+		# unlock_keys(%$job);
+		# $job->{this_is_finished} = 1;
+		# lock_keys(%$job);
+	}
+	$job_queue->job_part_finished($job, $do_startmore, @exit_code);
+}
 
-	$startmore = 1 unless defined $startmore;
+sub job_part_finished
+{
+	my ($job_queue, $job, $do_startmore, @exit_code) = @_;
+	$do_startmore = 1 unless defined $do_startmore;
 
 	my $host = $job->host;
 	my $jobnum = $job->jobnum;
 
 	print STDERR "# job $jobnum $job->{desc} on $host is done\n" if $debug > 5;
 
-	my $hr = $queue->{status}{$host} or confess;
+	my $hr = $job_queue->{status}{$host} or confess;
 	delete $hr->{running}{$jobnum} or confess;
 
-	$queue->set_readiness($host);
+	$job_queue->set_readiness($host);
 
-	$queue->startmore() if $startmore;
+	$job_queue->startmore() if $do_startmore;
 }
-
 
 sub alldone
 {
@@ -252,6 +358,14 @@ sub status
 			print STDERR "\t\tRunning: $job->{jobnum} $job->{desc}\n";
 		}
 	}
+	my $dg = $queue->{dependency_graph};
+	printf "Dependency Graph items: %d independent (%d locked %d active), %d total, alldone=%s\n",
+		scalar(keys(%{$dg->{independent}})),
+		scalar(grep { $_->{dg_lock} } values %{$dg->{independent}}),
+		scalar(grep { $_->{dg_active} } values %{$dg->{independent}}),
+		scalar(keys(%{$dg->{addrmap}})),
+		$dg->alldone
+		if $dg;
 }
 
 my $canonicalizer;

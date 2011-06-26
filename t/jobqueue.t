@@ -23,10 +23,11 @@ use Time::HiRes qw(time);
 use File::Slurp;
 
 
-my $generate_files_time = 0.05;
+my $generate_files_time = 0.01;
 my $sleeptime = 0.01;
 my $nfiles = 5;
 my $nsteps = 4;
+my $dump_output = 1;
 
 my $tmpdir = tempdir(CLEANUP => 1);
 
@@ -48,7 +49,7 @@ my $shdebug = $debug ? "set -x; " : "";
 plan tests => $nfiles + 1;
 
 my $queue = new Proc::JobQueue::BackgroundQueue (sleeptime => $sleeptime);
-$queue->addhost('localhost', jobs_per_host => 1);
+$queue->addhost('localhost', jobs_per_host => 8);
 
 for my $n (1..$nfiles) {
 	open my $fd, ">", "$tmpdir/step0A.file$n" or die;
@@ -78,6 +79,7 @@ for my $n (1..$nfiles) {
 	$queue->add(Sequence->new({}, {}, @seq));
 }
 
+
 $queue->finish();
 
 my $combined = read_file("$tmpdir/output");
@@ -89,4 +91,16 @@ for my $n (1..$nfiles) {
 }
 
 is(scalar(@match), $nfiles * $nsteps * 3, "count of commands run");
+
+$dump_output = 0;
+
+END {
+	if ($dump_output) {
+		my $out = read_file("$tmpdir/output");
+		diag $out;
+	} else {
+		diag "clean finish";
+	}
+}
+	
 

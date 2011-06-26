@@ -20,7 +20,7 @@ WriteMakefile(
 		'RPC::ToWorker'			=> 0.5,
 		'Hash::Util'			=> 0,
 		'Proc::Background'		=> 0,
-		'File::Slurp::Remote::BrokenDNS'	=> 0,
+		'File::Slurp::Remote'		=> 0.42,
 		'Time::HiRes'			=> 0,
 		'Hash::Util'			=> 0,
 		'aliased'			=> 0,

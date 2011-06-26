@@ -105,9 +105,7 @@ for my $out (@outputs) {
 			inputs	=> \@in,
 		},
 		preload			=> [qw(File::Slurp)],
-		desc			=> 'combine and sort',
-
-		desc            	=> 'remote job description',
+		desc			=> "combine and sort -> $out",
 		when_done		=> sub {
 			reset_bomb();
 			write_file("$tmpdir/$out", join("\n", @_) . "\n");
@@ -135,7 +133,7 @@ END_REMOTEJOB
 is(scalar(@outputs), 2, "num outputs");
 
 my $finish = Proc::JobQueue::DependencyTask->new(
-	desc	=> 'close up shop',
+	desc	=> 'unloop',
 	func	=> sub {
 		reset_bomb();
 		ok($queue->alldone, "queue empty");
@@ -149,16 +147,19 @@ undef @new_outputs;
 for my $out (@outputs) {
 	my @in = ("$out.A", "$out.B", "$out.C");
 	push(@new_outputs, @in);
-	my $job = Proc::JobQueue::DependencyJob->new($graph, sub {
-		my $data = '';
-		for my $input (@in) {
-			$data .= read_file("$tmpdir/$input");
-		}
-		write_file("$tmpdir/$out", $data);
-		reset_bomb();
-		ok(1, "wrote $out combining @in");
-		return 'all-done';
-	});
+	my $job = Proc::JobQueue::DependencyJob->new($graph, 
+		sub {
+			my $data = '';
+			for my $input (@in) {
+				$data .= read_file("$tmpdir/$input");
+			}
+			write_file("$tmpdir/$out", $data);
+			reset_bomb();
+			ok(1, "wrote $out combining @in");
+			return 'all-done';
+		},
+		desc	=> "read @in -> $out",
+	);
 	$inputs{$_} = $job for @in;
 	$graph->add($inputs{$out}, $job);
 }
@@ -172,7 +173,7 @@ for my $out (@outputs) {
 	my $in = ("$out.membuf");
 	push(@new_outputs, $in);
 	my $job = Proc::JobQueue::DependencyTask->new(
-		desc	=> 'write data files',
+		desc	=> "write $out.membuf -> $out",
 		func	=> sub {
 			write_file("$tmpdir/$out", join("\n", @{$membuf{$in}}) . "\n");
 			reset_bomb();
@@ -189,25 +190,28 @@ is(scalar(@outputs), 6, "num outputs");
 
 for my $out (@outputs) {
 	my $job;
-	$job = Proc::JobQueue::DependencyJob->new($graph, sub {
-		my $timer;
-		$timer = IO::Event->timer(
-			after => 0.01,
-			cb => sub {
-				my @r;
-				for my $i (1..$nrandom) {
-					push(@r, rand(1000));
-				}
-				$membuf{$out} = \@r;
-				$timer->cancel();
-				$job->finished(0);
-				reset_bomb();
-				ok(1, "job for $out finished");
-			},
-		);
-		ok(1, "set up timer for $out");
-		return 'all-keep';
-	});
+	$job = Proc::JobQueue::DependencyJob->new($graph, 
+		sub {
+			my $timer;
+			$timer = IO::Event->timer(
+				after => 0.01,
+				cb => sub {
+					my @r;
+					for my $i (1..$nrandom) {
+						push(@r, rand(1000));
+					}
+					$membuf{$out} = \@r;
+					$timer->cancel();
+					$job->finished(0);
+					reset_bomb();
+					ok(1, "job for $out finished");
+				},
+			);
+			ok(1, "set up timer for $out");
+			return 'all-keep';
+		},
+		desc	=> "set up timer to write generate membuf $out",
+	);
 	$graph->add($inputs{$out}, $job);
 }
 is(scalar(@outputs), 6, "num outputs");
