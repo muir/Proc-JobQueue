@@ -1,5 +1,5 @@
 NAME
-     Proc::JobQueue - generic job queue base class
+     Proc::JobQueue - job queue with dependencies, base class
 
 SYNOPSIS
      use Proc::JobQueue;
@@ -28,9 +28,17 @@ SYNOPSIS
 DESCRIPTION
     Generic queue of "jobs". Most likely to be subclassed for different
     situations. Jobs are registered. Hosts are registered. Jobs may or may
-    not be tied to particular hosts. Jobs are started on hosts.
+    not be tied to particular hosts. Jobs are started on hosts. Jobs may or
+    may not have dependencies on each other.
 
-    Jobs are started with:
+    Proc::JobQueue does not start jobs on its own: it needs something to
+    call "startmore()" every now and then. Two subsclasses provide this
+    complete Proc::JobQueue: Proc::JobQueue::EventQueue which provides an
+    event-based framework using IO::Event and
+    Proc::JobQueue::BackgroundQueue which provides a simple
+    loop-until-all-the-jobs-are-done construct.
+
+    From the jobs point of view, it will be started with:
 
       $job->jobnum($jobnum);
       $jobnum = $job->jobnum();
@@ -42,9 +50,17 @@ DESCRIPTION
 
       $queue->jobdone($job, $do_startmore, @exit_code);
 
-    Hosts are added with:
+    Jobs are run on hosts which must be added with:
 
-      $queue->addhost($host, name => $hostname, jobs_per_host => $number_to_run_on_this_host)
+      $queue->addhost($hostname, jobs_per_host => $number_to_run_on_this_host_at_one_time)
+
+    Jobs can be shell commands (Proc::JobQueue::Command), a sequence of
+    other jobs (Proc::JobQueue::Sequence), some standard file operations
+    (Proc::JobQueue::Move, Proc::JobQueue::Sort), custom cubclasses of the
+    base job class (Proc::JobQueue::Job), arbitrary perl code
+    (Proc::JobQueue::DependencyJob, Proc::JobQueue::Task), or arbitary perl
+    code pushed to a remote system to run
+    (Proc::JobQueue::RemoteDependencyJob).
 
 CONSTRUCTION
     The parameters for "new" are:
@@ -66,22 +82,23 @@ CONSTRUCTION
         If true, prevent any jobs from starting until "$queue->hold(0)" is
         called.
 
+    dependency_graph (default undef)
+        A dependency graph to track jobs and tasks that have dependencies
+        and are not yet ready to run because of their dependencies.
+
 METHODS
     configure(%params)
         Adjusts the same parameters that can be set with "new".
 
-    addhost($host, %params)
+    addhost($hostname, %params)
         Register a new host. Parameters are:
-
-        name
-            The hostname
 
         jobs_per_host
             The number of jobs that can be run at once on this host. This
-            defaults to the jobs_per_host parameter of the $queue.
+            defaults to the "jobs_per_host" parameter of the $queue.
 
     add($job, $host)
-        Add a job object to the queue. The job object must be a
+        Add a job object to the runnable queue. The job object must be a
         Proc::JobQueue::Job or subclass of Proc::JobQueue::Job. The $host
         parameter is optional: if not set, the job can be run on any host.
 
@@ -97,10 +114,29 @@ METHODS
 
           $queue->jobdone($job, $do_startmore, @exit_code);
 
+        Jobs added this way must be ready to run with no dependencies on
+        other jobs. Jobs and tasks that have dependencies should be added
+        with:
+
+          $queue->graph->add($job);
+
+    graph([Object::Dependency->new()])
+        Get or set the dependency graph used to track jobs and tasks that
+        have dependencies. The dependency graph is an Object::Dependency
+        object (or at least something that implements the same API). Items
+        in the dependency graph are not in the runnable queue. They will be
+        moved to the runnable queue when they do not have any un-met
+        dependencies.
+
     jobdone($job, $do_startmore, @exit_code)
         When jobs complete, they must call jobdone. If $do_startmore is
         true, then "startmore()" will be called. A true exit code signals an
         error and it is used by Proc::JobQueue::CommandQueue.
+
+    job_part_finished($job)
+        This marks the $job as complete and a new job can start in its
+        place. For Proc::JobQueue::DependencyJob jobs, this leaves the
+        dependency in place.
 
     alldone
         This checks the job queue. It returns true if all jobs have
@@ -116,18 +152,24 @@ METHODS
         This will start more jobs if possible. The return value is true if
         there are no more jobs to start.
 
+    hold($new_value)
+        Get (or set if $new_value is defined) the queue's hold-all-jobs
+        parameter. If hold-all-jobs is true, no jobs will be started or
+        pulled out of the dependency graph (if there is one).
+
+INTERNAL METHODS
+    These methods may be needed by subclassers or anyone poking around the
+    internals:
+
+    checkjobs
+        Check Proc::Background style jobs to see if any have finished.
+
     startjob($host, $jobnum, $job)
         This starts a single job. It is used by startmore() and probably
         should not be used otherwise.
 
-    checkjobs
-        This is used be Proc::JobQueue::BackgroundQueue.
-
-    hold($new_value)
-        Get (or set if $new_value is defined) the queue's hold-all-jobs
-        parameter.
-
-          $queue->jobdone($job, $do_startmore, @exit_code);
+    suicide
+        Called to shut down. Used by Proc::JobQueue::EventQueue.
 
 CANONICAL HOSTNAMES
     Proc::JobQueue needs canonical hostnames. It gets them by default with
@@ -141,8 +183,9 @@ CANONICAL HOSTNAMES
      use Proc::JobQueue qw(my_hostname canonicalize is_remote_host);
 
 SEE ALSO
-    Proc::JobQueue::Job Proc::JobQueue::DependencyQueue
-    Proc::JobQueue::BackgroundQueue
+    Proc::JobQueue::Job Proc::JobQueue::Command
+    Proc::JobQueue::DependencyJob Proc::JobQueue::RemoteDependencyJob
+    Proc::JobQueue::EventQueue Proc::JobQueue::BackgroundQueue
 
 LICENSE
     Copyright (C) 2007-2008 SearchMe, Inc. Copyright (C) 2008-2010 David
