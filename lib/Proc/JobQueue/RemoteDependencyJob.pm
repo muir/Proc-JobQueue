@@ -16,14 +16,11 @@ sub create
 {
 	my ($pkg, %params) = @_;
 
-	my $graph = $params{dependency_graph} || die "missing dependency_graph parameter";
-	my $job;
-	$job = $pkg->SUPER::new(
+	my $job = $pkg->SUPER::new(
 		local_data		=> undef,
 		data			=> undef,
 		chdir			=> undef,
 		prequel			=> '',
-		force_host		=> undef, # mirror DependencyJob
 		when_done		=> undef,
 		all_done		=> undef,
 		%params,
@@ -74,6 +71,7 @@ sub startup
 		local_data	=> $job->{local_data} || {
 			dependency_graph	=> $job->{dependency_graph},
 			master_job		=> $job,
+			job_queue		=> $job->queue(),
 		},
 	);
 }
@@ -89,12 +87,8 @@ Proc::JobQueue::RemoteDependencyJob - add a remote job to a dependency queue
 =head1 SYNOPSIS
 
  use Proc::JobQueue::RemoteDependencyJob;
- use Object::Dependency;
-
- $dependency_graph = Object::Dependency->new();
 
  $job = Proc::JobQueue::RemoteDependencyJob->create(
-	dependency_graph	=> $dependency_graph,
 	host			=> $remote_host_name,
 	%remote_job_args
  );
@@ -104,18 +98,30 @@ Proc::JobQueue::RemoteDependencyJob - add a remote job to a dependency queue
 This is sublcass of L<Proc::JobQueue::Job>.   It combines 
 a L<RPC::ToWorker> with a L<Proc::JobQueue> and provides a
 way to run arbitrary perl code in dependency order on a 
-network of systems.  Overall execution is controlled by
-L<Proc::JobQueue::DependencyQueue>.
+network of systems.  B<Overall execution must be controlled by
+L<Proc::JobQueue::EventQueue>>.    These jobs will not work
+with L<Proc::JobQueue::BackgroundQueue>.
 
 It is just like using a L<RPC::ToWorker>, except that
-the job doesn't run right away: it starts up when the 
+the remote job doesn't run right away: it starts up when the 
 job queue is ready to run it.
 
 Most construction (note: use C<create> not C<new>) parameters 
 are passed through to L<RPC::ToWorker> but there are a
 couple that are handled specially:
 
-=over 12
+=over 
+
+=item dependency_graph
+
+A reference to the dependency graph the job queue is using.   This is 
+optional.  If presentt the job will be inserted into the dependency
+graph with no dependencies.  If it is not present, the job will need
+to be added some other way: if it has dependencies, then with
+C<$dependency_graph-E<gt>add($job)> or if it does not have dependencies
+then with C<$job_queue-E<gt>add($job)>.
+
+The dependency graph is a L<Object::Dependency> object.  
 
 =item when_done
 
@@ -127,17 +133,22 @@ provided then C<$job-E<gt>finished(0)> will be called.
 
 =item local_data
 
-If not set, the following will be provided:
+If not set, the following will be provided as the C<local_data> parameter
+that L<RPC::ToWorker> uses.
 
-=over
+=over 20
 
 =item dependency_graph
 
-A reference to the dependency graph the job queue is using.
+A copy, if known.
 
 =item master_job
 
 A reference to self.
+
+=item job_queue
+
+A reference to the job queue.
 
 =back
 
@@ -161,6 +172,11 @@ B<String>.  Code to run on remote system.
 
 Directory to change to.
 
+=item preload
+
+B<String or ARRAY>.
+Modules to pre-load on the remote system.
+
 =item prequel
 
 B<String>.  File-scope eval code.
@@ -171,14 +187,14 @@ B<String>.  Prepend each line of output from the remote system with this string.
 
 =item all_done
 
-A callback to invoke when the remote slave is completely shut down.
+B<Code>. A callback to invoke when the remote slave is completely shut down.
 
 =back
 
 =head1 ERRATA
 
-There is also a C<new> constructor with different arguments.  It is retained
-for backwards compatbility.
+There is also a C<new> constructor with different arguments.  It is deprecated
+but retained for backwards compatbility.
 
 =head1 LICENSE
 

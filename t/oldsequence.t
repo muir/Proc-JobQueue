@@ -15,13 +15,12 @@ use Test::More;
 use Proc::JobQueue::BackgroundQueue;
 use aliased 'Proc::JobQueue::Sort';
 use aliased 'Proc::JobQueue::Move';
-use aliased 'Proc::JobQueue::Sequence';
+use aliased 'Proc::JobQueue::OldSequence';
 use aliased 'Proc::JobQueue::Command';
 use Sys::Hostname;
 use File::Temp qw(tempdir);
 use Time::HiRes qw(time);
 use File::Slurp;
-use Proc::JobQueue::DependencyTask;
 
 
 my $generate_files_time = 0.01;
@@ -47,7 +46,7 @@ $| = 1;
 
 my $shdebug = $debug ? "set -x; " : "";
 
-plan tests => $nfiles + 2;
+plan tests => $nfiles + 1;
 
 my $queue = new Proc::JobQueue::BackgroundQueue (sleeptime => $sleeptime);
 $queue->addhost('localhost', jobs_per_host => 8);
@@ -69,7 +68,6 @@ for my $n (1..$nfiles) {
 
 diag "done making input data";
 
-my @jobs;
 for my $n (1..$nfiles) {
 	my @seq;
 	for my $s (0..($nsteps-1)) {
@@ -78,18 +76,9 @@ for my $n (1..$nfiles) {
 		my $ns = $s+1;
 		push(@seq, Move->new({}, {}, "$tmpdir/step${s}C.file$n", "$tmpdir/step${ns}A.file$n", 'localhost'));
 	}
-	$queue->add($jobs[$n] = Sequence->new({}, {}, @seq));
+	$queue->add(OldSequence->new({}, {}, @seq));
 }
 
-my $onedone = Proc::JobQueue::DependencyTask->new(
-	desc	=> 'check output of job #1',
-	func	=> sub {
-		# diag `ls -l $tmpdir`;
-		ok(-e "$tmpdir/step4A.file1", "task check for $tmpdir/step4A.file1");
-		return 'done';
-	},
-);
-$queue->graph->add($onedone, $jobs[1]);
 
 $queue->finish();
 
@@ -113,5 +102,5 @@ END {
 		diag "clean finish";
 	}
 }
-
+	
 

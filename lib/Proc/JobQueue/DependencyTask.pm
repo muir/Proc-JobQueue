@@ -68,14 +68,15 @@ __END__
 
 =head1 NAME
 
-Proc::JobQueue::DependencyTask - callbacks for use with DependencyQueue
+Proc::JobQueue::DependencyTask - callbacks for use with Proc::JobQueue
 
 =head1 SYNOPSIS
 
  use Proc::JobQueue::DependencyTask;
- use Object::Dependency;
+ use Proc::JobQueue;
 
- $graph = Object::Dependency->new()
+ $job_queue = Proc::JobQueue->new();
+ $graph = job_queue->graph();
 
  $task = Proc::JobQueue::DependencyTask->new( $description, $callback );
 
@@ -85,14 +86,21 @@ Proc::JobQueue::DependencyTask - callbacks for use with DependencyQueue
 
 A task is lighter than a job (L<Proc::JobQueue::DependencyJob>) -- it
 is never more than a callback.   It does not get schedueled as a
-job (L<Proc::JobQueue>).
+job (L<Proc::JobQueue>) but rather is run as soon as it has no
+dependencies in the dependency gaph.
 
 Tasks can be put in a dependency graph (L<Object::Dependency>) 
-and used by L<Proc::JobQueue::DependencyQueue>.
+and used by L<Proc::JobQueue>.
 
 A task requires a callback.  
 The callback is invoked in array context.  The first element of the
 return value must be one of the following strings:
+
+L<Proc::JobQueue> job queues may more may not already have a 
+dependency graph.  The C<graph> method will add one to the 
+job queue if it doesn't already have one.   These tasks are not
+really manged by job queues because they are run as soon as they
+do not have any prerequisites in the dependency graph.
 
 =over
 

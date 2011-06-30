@@ -32,6 +32,8 @@ sub new
 		on_failure		=> undef,
 		errors			=> undef,
 		status			=> 'queued',
+		dependency_graph	=> undef,
+		force_host		=> undef,
 		%params
 	}, $pkg;
 	lock_keys(%$job);
@@ -252,9 +254,8 @@ Proc::JobQueue::Job - The $job objects for Proc::JobQueue
 =head1 DESCRIPTION
 
 This is the base class for the C<$job> objects used by 
-L<Proc::JobQueue>.  It supports running jobs in the background
-with L<Proc::Background>.  This class is designed to be overloaded.
-Only the C<start> and C<checkjob> methods use L<Proc::Background>.
+This class is designed to be overloaded.  For user APIs,
+see the L</SEE ALSO> section.
 
 =head1 CONSTRUCTION
 
@@ -312,24 +313,10 @@ A function callback that will be invoked only if the job fails.
 
 =over
 
-=item checkjob()
-
-A return value of undef indicates the job is still running.  A defined
-value is the exit code for the job.
-
-=item start
-
-Starts this job.  This is usually called by 
-C<Proc::JobQueue::startjob()>.
-
 =item host, jobnum, queue
 
 Get or set (if provided with a defined parameter) the
 host, jobnum, or queue parameter for the job.
-
-=item runnable
-
-Returns true if the job is runnable at this time.
 
 =item checkjob
 
@@ -346,19 +333,46 @@ the post callback (if any),
 C<$queue-E<gt>jobdone> and
 C<$queue-E<gt>startmore> will be invoked.
 
+=item addpostcb($callback, @args)
+
+Add a callback to be called when the job completes.
+
+The C<$job> object and the C<@exit_code> will be added to the callback's arguments.
+
+=back
+
+=head1 METHODS FOR SUBCLASSING
+
+If you are subclassing Job then you may want to define these:
+
+=over
+
+=item startup
+
+If defined, then a call to this method is what is used to start the job
+running.  
+
 =item sucess()
 
 Called when the job succeeds.  Doesn't do anything -- it's a hook to override.
 
 =item failed
 
-Called when the job failes.   Invokes the on_failure action if there is one.
+Called when the job fails.   Invokes the on_failure action if there is one.
 
-=item addpostcb($callback, @args)
+=item runnable
 
-Add a callback to be called when the job completes.
+Returns true if the job is runnable at this time.
 
-The C<$job> object and the C<@exit_code> will be added to the callback's arguments.
+=item checkjob
+
+A return value of undef indicates the job is still running.  A defined
+value is the exit code for the job.
+
+=item start
+
+Starts this job.  This is usually called by 
+C<Proc::JobQueue::startjob()>.
 
 =back
 

@@ -1,5 +1,5 @@
 
-package Proc::JobQueue::DependencyQueue;
+package Proc::JobQueue::EventQueue;
 
 use strict;
 use warnings;
@@ -21,41 +21,41 @@ sub new
 	$params{dependency_graph} ||= Object::Dependency->new();
 
 	my $queue = $pkg->SUPER::new(
+		unloop			=> undef,
 		startmore_in_progress	=> 0,
 		on_failure		=> \&on_failure,
 		%params
 	);
 
-	if (defined(&IO::Event::unloop_all)) {
-		my $last_dump = time;
+	my $last_dump = time;
 
-		my $timer = IO::Event->timer(
-			interval	=> $params{timer_interval} || $timer_interval,
-			cb		=> sub {
-				print STDERR "beep!\n" if $debug;
-				eval {
-					$queue->startmore;
-				};
-				if ($@) {
-					print STDERR "DIE DIE DIE DIE DIE (DT1): $@";
-					# exit 1; hangs
-					POSIX::_exit(1);
-				};
-				if ($debug && time > $last_dump + $timer_interval) {
-					$params{dependency_graph}->dump_graph();
-					$last_dump = time;
-				}
-				use POSIX ":sys_wait_h";
-				my $k;
-				do { $k = waitpid(-1, WNOHANG) } while $k > 0;
-			},
-		);
+	my $timer = IO::Event->timer(
+		interval	=> $params{timer_interval} || $timer_interval,
+		cb		=> sub {
+			print STDERR "beep!\n" if $debug;
+			eval {
+				$queue->startmore;
+			};
+			if ($@) {
+				print STDERR "DIE DIE DIE DIE DIE (DT1): $@";
+				# exit 1; hangs
+				POSIX::_exit(1);
+			};
+			if ($debug && time > $last_dump + $timer_interval) {
+				$params{dependency_graph}->dump_graph();
+				$last_dump = time;
+			}
+			use POSIX ":sys_wait_h";
+			my $k;
+			do { $k = waitpid(-1, WNOHANG) } while $k > 0;
+		},
+	);
 
-		$Event::DIED = sub {
-			Event::verbose_exception_handler(@_);
-			IO::Event::unloop_all();
-		};
-	}
+	$Event::DIED = sub {
+		Event::verbose_exception_handler(@_);
+		$queue->unloop();
+		IO::Event::unloop_all();
+	};
 
 	return $queue;
 }
@@ -63,7 +63,9 @@ sub new
 sub unloop
 {
 	my ($queue) = @_;
-	if (defined(&IO::Event::unloop_all)) {
+	if ($queue->{unloop}) {
+		$queue->unloop($queue->alldone);
+	} else {
 		IO::Event::unloop_all();
 	}
 }
@@ -93,28 +95,24 @@ Object::Dependency queue.
 
 =head1 NAME
 
- Proc::JobQueue::DependencyQueue - [DEPRECATED] JobQueue combined with a dependency graph
+ Proc::JobQueue::EventQueue - JobQueue combined with IO::Event
 
 =head1 SYNOPSIS
 
- use Proc::JobQueue::DependencyQueue;
- use Object::Dependency;
+ use Proc::JobQueue::EventQueue;
  use Proc::JobQueue::DependencyTask;
  use Proc::JobQueue::DependencyJob;
 
- my $dependency_graph = Object::Dependency->new();
+ my $queue = Proc::JobQueue::EventQueue->new(
+	hold_all => 1,
+ );
 
- my $job = Proc::JobQueue::DependencyJob->new($dependency_graph, $callback_func);
+ my $job = Proc::JobQueue::DependencyJob->new($queue, $callback_func);
 
  my $task => Proc::JobQueue::DependencyTask->new(desc => $desc, func => $callback_func);
 
  $dependency_graph->add($job);
  $dependency_graph->add($task);
-
- my $queue = Proc::JobQueue::DependencyQueue->new(
-	dependency_graph => $dependency_graph,
-	hold_all => 1,
- );
 
  $job_queue->hold(0);
 
@@ -126,10 +124,9 @@ Object::Dependency queue.
 
 =head1 DESCRIPTION
 
-This module is now deprecated in favor of L<Proc::JobQueue::EventQueue>.
-
-This module is a sublcass of L<Proc::JobQueue>.  It combines a job
-queue with a a dependency graph, L<Object::Dependency>.
+This module is a sublcass of L<Proc::JobQueue>.  It combines the job
+queue with L<IO::Event> for an asynchronous event loop.  L<IO::Event>
+can use a select loop from L<Event>, L<AnyEvent> or its own.
 
 The jobs that it runs are either full-fledged jobs, 
 L<Proc::JobQueue::DependencyJob>, or 
@@ -139,10 +136,6 @@ prerequisites are met: L<Proc::JobQueue::DependencyTask>.
 Generally, the way to use this is to generate your dependency graph, then
 create your job queue, then start some jobs.
 
-It's expected that you'll use asynchronous I/O via L<IO::Event>, but that is not
-required.   If you're using L<IO::Event>, it sets up a timer event to start more
-jobs.  It also changes C<$Event::DIED> to unloop.
-
 =head1 API
 
 In addition to the parameters supported by L<Proc::JobQueue>, the following
@@ -150,20 +143,15 @@ construction parameters are used:
 
 =over
 
-=item dependency_graph
+=item unloop
 
-This should be a L<Object::Dependency> object.
+B<Code REF>.  If provided, invoke it to when the 
+job queue is empty instead of calling C<IO::Event::unloop_all()>.
 
-=back
+=item on_failure
 
-In addition to the methods inherited from L<Proc::JobQueue>, this module
-adds:
-
-=over
-
-=item job_part_finished($job)
-
-This marks the C<$job> as complete and a new job can start in its place.
+B<Code REF>.  If provided, override the default behavior of how to
+handle the failure of a job.  See the code for details.
 
 =back
 

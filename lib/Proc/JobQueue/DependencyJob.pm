@@ -26,7 +26,6 @@ sub new
 		dep_cb			=> $cb,
 		started			=> 0,
 		runnable		=> 0,
-		force_host		=> undef,
 		%params,
 	);
 	$dependency_graph->add($job);
@@ -104,7 +103,7 @@ __END__
 
 =head1 NAME
 
-Proc::JobQueue::DependencyJob - job object for DependencyQueues
+ Proc::JobQueue::DependencyJob - dependency-aware job object for Proc::JobQueue
 
 =head1 SYNOPSIS
 
@@ -127,7 +126,7 @@ Proc::JobQueue::DependencyJob - job object for DependencyQueues
 
 Proc::JobQueue::DependencyJob is a subclass of 
 L<Proc::JobQueue::Job> used to define jobs to run from a 
-L<Proc::JobQueue::DependencyQueue>.
+L<Proc::JobQueue>.
 
 DependencyJob jobs are perl objects with a callback API.  C<$job-E<gt>startup()> is
 called to start the job.  That in turn calls, the callback provided in construction.  The
@@ -221,8 +220,9 @@ This marks this job as failed.
 
 =head1 SEE ALSO
 
-L<Proc::JobQueue::DependencyQueue>
+L<Proc::JobQueue::EventQueue>
 L<Proc::JobQueue::Job>
+L<Proc::JobQueue::DependencyTask>
 L<Proc::JobQueue>
 
 =head1 LICENSE

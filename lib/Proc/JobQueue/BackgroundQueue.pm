@@ -17,21 +17,12 @@ sub new
 	my $queue = $pkg->SUPER::new(sleeptime => 2, %params);
 }
 
-sub add
-{
-	my $queue = shift;
-	my $job = shift;
-	confess "cannot handle callback jobs" 
-		unless $job->can_command;
-	$queue->SUPER::add($job, @_);
-}
-
 sub finish
 {
 	my $queue = shift;
 	for(;;) {
 		$queue->checkjobs();
-		$queue->startmore();
+		return if $queue->startmore();
 
 		my $running = 0;
 		my $queued = keys %{$queue->{queue}};
@@ -49,8 +40,6 @@ sub finish
 				print "queued: " . join(", ", map { $_ . ": " . $hr->{running}{$_}{desc} } keys %{$hr->{queue}} ) . "\n" if $queued;
 			}
 		}
-
-		return unless $queued || $running;
 
 		print "Jobs are waiting to be run, but none are running\n" unless $running;
 		sleep($queue->{sleeptime});
@@ -77,11 +66,17 @@ __END__
 
 This is a job queue module for jobs that will be run in the background.
 
-C<checkjobs()> needs to be called periodically.   When all the jobs
-are queued, a call to C<finish()> will block until all the jobs
+C<checkjobs()> needs to be called periodically to start new jobs. 
+When all the jobs are queued, a call to C<finish()> will block until all the jobs
 have completed.
 
-Jobs are invoked using L<Proc::Background>.
+The C<finish()> method is not compatible with runing in an event loop.
+If you need that functionality, see L<Proc::JobQueue::EventQueue>.
+
+=head1 SEE ALSO
+
+L<Proc::JobQueue>
+L<Proc::JobQueue::EventQueue>
 
 =head1 LICENSE
 
