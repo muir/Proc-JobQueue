@@ -25,7 +25,6 @@ sub create
 		all_done		=> undef,
 		%params,
 	);
-	$graph->add($job);
 	return $job;
 }
 
